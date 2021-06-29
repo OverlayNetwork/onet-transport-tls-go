@@ -13,3 +13,7 @@ require (
 )
 
 replace github.com/overlaynetwork/onet-go v0.0.4 => ../onet-go
+
+replace github.com/overlaynetwork/onet-transport-kcp-go => ../onet-transport-kcp-go
+
+replace github.com/overlaynetwork/onet-transport-mux-go => ../onet-transport-mux-go

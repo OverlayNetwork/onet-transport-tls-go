@@ -65,6 +65,10 @@ func keyToCertificate(k key.Key) (*tls.Certificate, error) {
 
 	signature, err := key.SignWithKey(k, append([]byte(certificatePrefix), certKeyPub...))
 
+	if err != nil {
+		return nil, err
+	}
+
 	value, err := asn1.Marshal(signedKey{
 		Provider:  k.Provider().Name(),
 		PubKey:    keyBytes,

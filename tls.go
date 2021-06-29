@@ -1,6 +1,7 @@
 package tls
 
 import (
+	"context"
 	"crypto/tls"
 	"sync"
 
@@ -23,12 +24,14 @@ type Transport interface {
 
 type tlsTransport struct {
 	sync.RWMutex
-	remote map[string]*Peer
+	remote   map[string]*Peer
+	protocol string
 }
 
-func newtlsTransport() *tlsTransport {
+func NewTLSTransport(protocol string) *tlsTransport {
 	return &tlsTransport{
-		remote: make(map[string]*Peer),
+		remote:   make(map[string]*Peer),
+		protocol: protocol,
 	}
 }
 
@@ -37,12 +40,12 @@ func (transport *tlsTransport) String() string {
 }
 
 func (transport *tlsTransport) Protocol() string {
-	return "tls"
+	return transport.protocol
 }
 
 func (transport *tlsTransport) ServerPeer(conn onet.Conn) (*Peer, error) {
 
-	netAddr, err := conn.LocalAddr().ResolveNetAddr()
+	netAddr, _, err := conn.LocalAddr().ResolveNetAddr()
 
 	if err != nil {
 		return nil, err
@@ -55,7 +58,7 @@ func (transport *tlsTransport) ServerPeer(conn onet.Conn) (*Peer, error) {
 }
 func (transport *tlsTransport) ClientPeer(conn onet.Conn) (*Peer, error) {
 
-	netAddr, err := conn.RemoteAddr().ResolveNetAddr()
+	netAddr, _, err := conn.RemoteAddr().ResolveNetAddr()
 
 	if err != nil {
 		return nil, err
@@ -67,19 +70,7 @@ func (transport *tlsTransport) ClientPeer(conn onet.Conn) (*Peer, error) {
 	return transport.remote[netAddr.String()], nil
 }
 
-func (transport *tlsTransport) Client(network *onet.OverlayNetwork, conn onet.Conn, chainOffset int) (onet.Conn, error) {
-
-	netAddr, err := conn.LocalAddr().ResolveNetAddr()
-
-	if err != nil {
-		return nil, err
-	}
-
-	netConn, err := onet.FromOnetConn(conn)
-
-	if err != nil {
-		return nil, err
-	}
+func (transport *tlsTransport) Client(ctx context.Context, network *onet.OverlayNetwork, addr *onet.Addr, next onet.Next) (onet.Conn, error) {
 
 	var key key.Key
 
@@ -88,6 +79,18 @@ func (transport *tlsTransport) Client(network *onet.OverlayNetwork, conn onet.Co
 	}
 
 	tlsConfig, remoteKey, err := newTLSConfig(key)
+
+	if err != nil {
+		return nil, err
+	}
+
+	underlyConn, err := next()
+
+	if err != nil {
+		return nil, err
+	}
+
+	netConn, err := onet.FromOnetConn(underlyConn)
 
 	if err != nil {
 		return nil, err
@@ -104,27 +107,15 @@ func (transport *tlsTransport) Client(network *onet.OverlayNetwork, conn onet.Co
 	transport.Lock()
 	defer transport.Unlock()
 
-	transport.remote[netAddr.String()] = &Peer{
+	transport.remote[addr.String()] = &Peer{
 		LocalKey:        key,
 		RemotePublicKey: remotePublicKey,
 	}
 
-	return onet.ToOnetConn(session, network)
+	return onet.ToOnetConn(session, network, addr)
 }
 
-func (transport *tlsTransport) Server(network *onet.OverlayNetwork, conn onet.Conn, chainOffset int) (onet.Conn, error) {
-
-	netAddr, err := conn.RemoteAddr().ResolveNetAddr()
-
-	if err != nil {
-		return nil, err
-	}
-
-	netConn, err := onet.FromOnetConn(conn)
-
-	if err != nil {
-		return nil, err
-	}
+func (transport *tlsTransport) Server(ctx context.Context, network *onet.OverlayNetwork, addr *onet.Addr, next onet.Next) (onet.Conn, error) {
 
 	var key key.Key
 
@@ -133,6 +124,18 @@ func (transport *tlsTransport) Server(network *onet.OverlayNetwork, conn onet.Co
 	}
 
 	tlsConfig, remoteKey, err := newTLSConfig(key)
+
+	if err != nil {
+		return nil, err
+	}
+
+	underlyConn, err := next()
+
+	if err != nil {
+		return nil, err
+	}
+
+	netConn, err := onet.FromOnetConn(underlyConn)
 
 	if err != nil {
 		return nil, err
@@ -149,12 +152,21 @@ func (transport *tlsTransport) Server(network *onet.OverlayNetwork, conn onet.Co
 	transport.Lock()
 	defer transport.Unlock()
 
-	transport.remote[netAddr.String()] = &Peer{
+	transport.remote[addr.String()] = &Peer{
 		LocalKey:        key,
 		RemotePublicKey: remotePublicKey,
 	}
 
-	return onet.ToOnetConn(session, network)
+	return onet.ToOnetConn(session, network, addr)
+}
+
+func (transport *tlsTransport) Close(network *onet.OverlayNetwork, addr *onet.Addr, next onet.NextClose) error {
+	transport.Lock()
+	delete(transport.remote, addr.String())
+	transport.Unlock()
+
+	return next()
+
 }
 
 var protocol = &onet.Protocol{Name: "tls"}
@@ -165,7 +177,7 @@ func init() {
 		panic(err)
 	}
 
-	if err := onet.RegisterTransport(newtlsTransport()); err != nil {
+	if err := onet.RegisterTransport(NewTLSTransport("tls")); err != nil {
 		panic(err)
 	}
 }

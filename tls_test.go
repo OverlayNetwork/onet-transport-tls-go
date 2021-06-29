@@ -72,4 +72,6 @@ func TestConn(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, string(buff[:n]), "world")
+
+	println(conn.LocalAddr().String(), conn.RemoteAddr().String())
 }
